@@ -3,10 +3,10 @@ title: "Big Mart Sales Analysis"
 author: "Sheila"
 date: "2026-08-19"
 output:
-  html_document:
+ html_document:
   theme: flatly
-toc: true
-toc_float: true
+  toc:   true
+  toc_float: true
 ---
 
 ```{r setup, include=FALSE}

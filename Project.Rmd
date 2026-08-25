@@ -3,8 +3,10 @@ title: "Big Mart Sales Analysis"
 author: "Sheila"
 date: "2026-08-19"
 output:
-  html_document: default
-  pdf_document: default
+  html_document:
+  theme: flatly
+toc: true
+toc_float: true
 ---
 
 ```{r setup, include=FALSE}

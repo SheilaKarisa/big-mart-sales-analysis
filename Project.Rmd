@@ -1,12 +1,12 @@
 ---
-title: "Big Mart Sales Analysis"
+title: "Project"
 author: "Sheila"
 date: "2026-08-19"
 output:
- html_document:
-  theme: flatly
-  toc:   true
-  toc_float: true
+  html_document:
+    theme: flatly
+    toc:   true
+    toc_float: true
 ---
 
 ```{r setup, include=FALSE}
@@ -19,7 +19,7 @@ library(magrittr)
 library(dplyr)
 ```
 
-#1. Load raw data to build SQLite DB
+## Load raw data to build SQLite DB
 
 ```{r load-data} 
 bigmart<-read.csv("Train.csv")
@@ -28,7 +28,7 @@ con <- dbConnect(SQLite(), "bigmart.db")
 dbWriteTable(con, "sales", bigmart, overwrite = TRUE)
 ```
 
-#2. Clean fat column 
+## Clean fat column 
 
 ```{r clean-view}
 # Data cleaning via SQLite view
@@ -62,7 +62,7 @@ missing_check <- dbGetQuery(con, "
 missing_check
 ```
 
-#3. Revenue by fat content
+## Revenue by fat content
 
 ```{r fat-analysis}
 #Revenue by fat content- with percentage share
@@ -100,7 +100,7 @@ dir.create("outputs", showWarnings = FALSE)
 ggsave("outputs/fat_content_revenue.png", width = 8, height = 5, dpi = 150)
 ```
 
-#4. Revenue by Outlet_type
+## Revenue by Outlet_type
 
 ```{r Outlet-type-analysis}
 Outlet_type_analysis<-dbGetQuery(con, "
@@ -137,7 +137,8 @@ ggplot(Outlet_type_analysis, aes(x = reorder(Outlet_Type, total_revenue), y = to
 dir.create("outputs", showWarnings = FALSE)
 ggsave("outputs/Outlet_type_revenue.png", width = 8, height = 5, dpi = 150)
 ```
-#5. Revenue by outlet_size
+
+## Revenue by outlet_size
 
 ```{r Outlet-size-analysis}
 Outlet_size_analysis<-dbGetQuery(con, "
@@ -165,7 +166,7 @@ dir.create("outputs", showWarnings = FALSE)
 ggsave("outputs/Outlet_size_revenue.png", width = 8, height = 5, dpi = 150)
 ```
 
-#6.Revenue by Item-Type
+## Revenue by Item-Type
 
 ```{r item-type analysis, fig.height= 7}
 Item_type_analysis<-dbGetQuery(con,"
@@ -196,7 +197,7 @@ dir.create("outputs", showWarnings = FALSE)
 ggsave("outputs/Item_type_revenue.png", width = 8, height = 5, dpi = 150)
 ```
 
-#7. Price Vs. Sales Relationships
+## Price Vs. Sales Relationships
 
 ```{r price-sales-scatter}
 Price_sales<-dbGetQuery(con, "
@@ -230,7 +231,7 @@ dir.create("outputs", showWarnings = FALSE)
 ggsave("outputs/Price_sales$Item_MRP correlation.png", width = 8, height = 5, dpi = 150)
 ```
 
-#8. Sales by Outlet Establishment Year
+## Sales by Outlet Establishment Year
 
 ```{r year-analysis}
 Year_analysis<-dbGetQuery(con, "
@@ -259,7 +260,8 @@ dir.create("outputs", showWarnings = FALSE)
 ggsave("outputs/Item_Outlet_Sales_revenue.png", width = 8, height = 5, dpi = 150)
 ```
 
-#9. Key Findings:
+## Key Findings:
+
 ```{r Findings}
 list.files("outputs")
 file.rename("outputs/fat_content_revenue.png", "outputs/fat_content_revenue.png")
@@ -269,7 +271,7 @@ file.rename("outputs/Item_type_revenue.png", "outputs/item_type_revenue.png")
 file.rename("outputs/Item_Outlet_Sales_revenue.png", "outputs/price_vs_sales.png")
 file.remove("outputs/Price_sales$Item_MRP correlation.png")
 list.files("outputs")
-#9. Key Findings
+# Key Findings
 
 # - Price vs. Sales: The correlation between Item_MRP and Item_Outlet_Sales is 
 #   0.57 overall (R² ≈ 0.32) — a moderate positive relationship. Higher-priced 
@@ -321,7 +323,7 @@ list.files("outputs")
 #   sales values.
 ```
 
-#10. Disconnect
+## Disconnect
 
 ```{r database disconnect}
 dbDisconnect(con)

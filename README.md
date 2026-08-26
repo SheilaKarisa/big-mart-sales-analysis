@@ -16,6 +16,7 @@ View the interactive report: **[BigMart Sales Analysis Dashboard](https://sheila
 * **Pricing vs. Sales Volume:** Analyzed price elasticity and revenue relationships across item categories. Identified a moderate positive relationship ($r = 0.57$, R^2 approximately 0.32$) between Item Price (Item MRP) and sales revenue (Item Outlet Sales). While higher-priced items drive larger sales totals, pricing accounts for roughly one-third of overall sales variance. Cross-segment analysis confirmed this relationship remains virtually identical regardless of product fat content (Low Fat: 0.563 vs. Regular: 0.576).
 
 ##### Repository Structure
+```text
 .
 ├── Project.Rmd       # Source R Markdown code with SQLite queries & visualizations
 ├── index.html        # Rendered HTML report hosted on GitHub Pages

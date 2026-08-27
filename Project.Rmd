@@ -1,0 +1,319 @@
+---
+title: "BigMart Sales & Inventory Performance Analysis"
+author: "Sheila"
+date: "2026-08-19"
+output:
+  html_document:
+    theme: "flatly"
+    highlight: "tango"
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+library(readr)
+library(DBI)
+library(RSQLite)
+library(ggplot2)
+library(scales)
+library(magrittr)
+library(dplyr)
+library(knitr)
+```
+
+## Set up and SQLite Engine Initialization
+
+```{r load-data} 
+bigmart<-read.csv("Train.csv")
+con <- dbConnect(SQLite(), "bigmart.db")
+
+dbWriteTable(con, "sales", bigmart, overwrite = TRUE)
+
+```
+## Business Problem:
+
+* **BigMart operates a nationwide retail network where managing inventory mix and optimizing sales across diverse product categories presents a major operational challenge. Inefficient stock allocation across different outlet formats risks tied-up capital and missed revenue opportunities.
+
+## Business Objective:
+
+* ** To evaluate the core drivers of item-level retail performance by quantifying how product attributes (pricing, category composition, fat content) and store characteristics (outlet format, store size) impact revenue generation across locations.
+
+## Executive Summary:
+
+* **An evaluation of 8,523 SKU-level records across BigMart retail locations reveals that total revenue performance across product categories, fat content, and store formats is primarily driven by catalog composition and volume density rather than per-unit performance variations. However, structural efficiencies exist in store design: Supermarket Type3 and Medium-sized outlets demonstrate true operational outperformance, generating significantly higher revenue per item. Strategic focus should prioritize expanding high-efficiency formats and optimizing SKU breadth rather than relying on category-level repricing.
+
+## Data Cleaning and Feature Engineering 
+
+```{r clean-view}
+# Data cleaning via SQLite view
+dbExecute(con, "DROP VIEW IF EXISTS clean_sales")
+
+dbExecute(con, "
+  CREATE VIEW clean_sales AS
+  SELECT *,
+    CASE
+      WHEN Item_Fat_Content IN ('low fat', 'LF') THEN 'Low Fat'
+      WHEN Item_Fat_Content = 'reg' THEN 'Regular'
+      ELSE Item_Fat_Content
+    END AS Clean_Fat_Content,
+    CASE
+      WHEN Outlet_Size = '' OR Outlet_Size IS NULL THEN 'Unknown'
+      ELSE Outlet_Size
+    END AS Clean_Outlet_Size
+  FROM sales
+")
+bigmart_clean <- dbGetQuery(con, "SELECT * FROM clean_sales") 
+str(bigmart_clean)
+
+# Check extent of missing/blank data before relying on cleaned columns
+missing_check <- dbGetQuery(con, "
+  SELECT 
+    SUM(CASE WHEN Outlet_Size = '' OR Outlet_Size IS NULL THEN 1 ELSE 0 END) AS n_unknown_size,
+    SUM(CASE WHEN Item_Weight IS NULL THEN 1 ELSE 0 END) AS n_missing_weight,
+    COUNT(*) AS total_rows
+  FROM sales
+")
+missing_check
+```
+
+## Revenue by fat content
+
+```{r fat-analysis}
+
+fat_pct_analysis <- dbGetQuery(con, "
+    SELECT Clean_Fat_Content,
+    SUM(Item_Outlet_Sales) AS total_revenue,
+    ROUND(SUM(Item_Outlet_Sales) * 100.0 / (SELECT SUM(Item_Outlet_Sales) FROM clean_sales), 1) AS pct_of_total_revenue
+FROM clean_sales
+GROUP BY Clean_Fat_Content")
+
+dbGetQuery(con, "
+  SELECT Clean_Fat_Content,
+         COUNT(*) AS n_items,
+         AVG(Item_Outlet_Sales) AS avg_revenue_per_item
+  FROM clean_sales
+  GROUP BY Clean_Fat_Content
+")
+
+ggplot(fat_pct_analysis, aes(x = Clean_Fat_Content, y = total_revenue, fill = Clean_Fat_Content)) +
+  geom_col(width = 0.5, show.legend = FALSE) +
+  scale_y_continuous(labels = label_dollar()) + # Formats axis as $10M, $5M, etc.
+  theme_minimal(base_size = 14) + # Clean, modern background style
+  labs(
+    title = "FMCG Revenue Breakdown: Low Fat vs Regular",
+    subtitle = "Which products type dominate BigMart's total sales volume",
+    x = "Product Type",
+    y = "Total Revenue ($)"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+dir.create("outputs", showWarnings = FALSE)
+ggsave("outputs/fat_content_revenue.png", width = 8, height = 5, dpi = 150)
+```
+>**Key Insight:** Low Fat products account for **64% of total revenue ($11.9M)** compared to 36% for Regular items ($6.7M). However, this gap is driven almost entirely by catalog composition (64.7% of total SKUs are Low Fat) rather than superior per-item sales performance.
+
+## Revenue by Outlet_type
+
+```{r Outlet-type-analysis}
+Outlet_type_analysis<-dbGetQuery(con, "
+SELECT Outlet_Type,
+  COUNT(*) AS n_items,
+  SUM(Item_Outlet_Sales) AS total_revenue,
+  AVG(Item_Outlet_Sales) AS avg_revenue_per_item
+FROM clean_sales
+GROUP BY Outlet_Type
+ORDER BY total_revenue DESC
+")
+
+dbGetQuery(con, "
+  SELECT Outlet_Type,
+         COUNT(*) AS n_items,
+         AVG(Item_Outlet_Sales) AS avg_revenue_per_item
+  FROM clean_sales
+  GROUP BY Outlet_Type
+")
+
+ggplot(Outlet_type_analysis, aes(x = reorder(Outlet_Type, total_revenue), y = total_revenue, fill = Outlet_Type)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Revenue by Outlet Type",
+    subtitle = "Which store formats drive the most sales?",
+    x = NULL,
+    y = "Total Revenue"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+dir.create("outputs", showWarnings = FALSE)
+ggsave("outputs/Outlet_type_revenue.png", width = 8, height = 5, dpi = 150)
+```
+> **Key Insight:** **Supermarket Type1** drives overall volume, generating **$12.9M (69.5% of total revenue)** across 5,577 items. However, **Supermarket Type3** exhibits superior per-item sales efficiency, averaging **$3,694 per SKU** compared to Type1's **$2,316**, despite operating with 83% fewer items (935 SKUs). Grocery Stores represent a low-margin format, averaging just $340 per item and contributing 2% of total revenue.
+
+## Revenue by outlet_size
+
+```{r Outlet-size-analysis}
+Outlet_size_analysis<-dbGetQuery(con, "
+        SELECT Clean_Outlet_Size,
+        COUNT(*) AS n_items,
+        SUM(Item_Outlet_Sales) AS total_revenue,
+        AVG(Item_Outlet_Sales) AS agv_revenue_per_item
+        FROM clean_sales
+        GROUP BY Clean_Outlet_Size
+        ORDER BY total_revenue DESC
+        ")
+ggplot(Outlet_size_analysis, aes(x = reorder(Clean_Outlet_Size, -total_revenue), y = total_revenue, fill = Clean_Outlet_Size)) +
+  geom_col(width = 0.5, show.legend = FALSE) +
+  scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Revenue by Outlet Size",
+    subtitle = "Which store size drives the most sales?",
+    x = "Outlet Size",
+    y = "Total Revenue"
+  ) +
+  theme(plot.title = element_text(face = "bold")
+        )
+dir.create("outputs", showWarnings = FALSE)
+ggsave("outputs/Outlet_size_revenue.png", width = 8, height = 5, dpi = 150)
+```
+> **Key Insight:** **Medium-sized outlets** lead across all formats, generating **$7.49M (40.3% of total revenue)** and achieving the highest yield at **$2,682 per item**. Unlike catalog volume effects, Medium stores demonstrate genuine operational outperformance. Notably, High-sized outlets post the second-highest average per-item yield ($2,299) despite managing the fewest total items (932 SKUs). 
+> 
+> *Note:* **28.3% of records (2,410 items)** lacked outlet size data and were coded as "Unknown". Final footprint strategy should account for this structural gap.
+
+## Revenue by Item-Type
+
+```{r item-type analysis, fig.height= 7}
+Item_type_analysis<-dbGetQuery(con,"
+    SELECT Item_Type,
+    COUNT(*) AS n_items,
+    SUM(Item_Outlet_Sales) AS total_revenue,
+    AVG(Item_Outlet_Sales) AS agv_revenue_per_item
+  FROM clean_sales
+  GROUP BY Item_Type
+  ORDER BY total_revenue DESC
+    ")
+ggplot(Item_type_analysis, aes(x=reorder(Item_Type, total_revenue), y=
+total_revenue, fill = total_revenue)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
+  scale_fill_gradient(low = "#a6cee3", high = "#1f78b4" ) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Revenue by Item Category",
+    subtitle = "Top-performing product categories across all outlets",
+    x = NULL,
+    y = "Total Revenue"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+dir.create("outputs", showWarnings = FALSE)
+ggsave("outputs/Item_type_revenue.png", width = 8, height = 5, dpi = 150)
+```
+> **Key Insight:** **Fruits and Vegetables ($2.82M)** and **Snack Foods ($2.73M)** lead gross sales, with nearly identical SKU allocations (~1,200 items each). However, per-item yield remains remarkably uniform across all 16 categories, ranging strictly between **$1,900 and $2,400 per SKU** (e.g., Seafood generates $2,326 per item across just 64 SKUs). This indicates category revenue is dictated by stock allocation volume rather than consumer price premiums or category-specific demand elasticity.
+
+## Price Vs. Sales Relationships
+
+```{r price-sales-scatter}
+Price_sales<-dbGetQuery(con, "
+ SELECT Item_MRP, Item_Outlet_Sales, Clean_Fat_Content
+ FROM clean_sales
+ ")
+
+cor(Price_sales$Item_MRP, Price_sales$Item_Outlet_Sales)
+#splitting by fat content
+Price_sales%>%
+  group_by(Clean_Fat_Content)%>%
+  summarise(correlation = cor(Item_MRP, Item_Outlet_Sales))
+
+ggplot(Price_sales, aes(x = Item_MRP, y = Item_Outlet_Sales, colour = 
+Clean_Fat_Content)) +
+ geom_point(alpha = 0.3, size = 1) +
+ geom_smooth(method = "lm", se = FALSE, linewidth = 1) +
+  scale_y_continuous(labels = label_dollar()) +
+  scale_x_continuous(labels = label_dollar()) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Does Higher Price Mean Higher Sales?",
+    subtitle = "Item MRP vs. Outlet sales, by product fat content",
+    x= "Item MRP",
+    y="Outlet Sales",
+    color = "Fat Content"
+  )+
+  theme(plot.title = element_text(face = "bold"))
+
+dir.create("outputs", showWarnings = FALSE)
+ggsave("outputs/Price_sales$Item_MRP correlation.png", width = 8, height = 5, dpi = 150)
+```
+> **Key Insight:** A moderate positive correlation exists between Maximum Retail Price (Item_MRP) and sales (**r = 0.57, R² ≈ 0.32**), indicating that higher-priced items generate more overall revenue, though price alone explains only about a third of sales variation. This pricing dynamic is consistent across product segments (**Low Fat: 0.563 vs. Regular: 0.576**), demonstrating that fat content does not alter how price drives sales.
+
+## Sales by Outlet Establishment Year
+
+```{r year-analysis}
+Year_analysis<-dbGetQuery(con, "
+  SELECT Outlet_Establishment_Year, SUM(Item_Outlet_Sales) AS total_revenue,
+  AVG(Item_Outlet_Sales) AS avg_revenue_per_item
+  FROM clean_sales
+  GROUP BY Outlet_Establishment_Year
+  ORDER BY Outlet_Establishment_Year
+")
+
+ggplot(Year_analysis, aes(x = factor(Outlet_Establishment_Year), y = total_revenue)) +
+  geom_col(fill = "#3182bd", width = 0.6 ) +
+  scale_y_continuous(labels = label_dollar(scale = 1e-6, suffix = "M")) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Revenue By Outlet Establishment Year",
+    subtitle= "Do older stores generate more total revenue?",
+    x= "Establishment Year",
+    y= "Total Revenue"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+dir.create("outputs", showWarnings = FALSE)
+ggsave("outputs/Item_Outlet_Sales_revenue.png", width = 8, height = 5, dpi = 150)
+```
+> **Key Insight:** Store establishment year shows no direct, linear correlation with sales performance. Outlets established in **1985** lead total revenue ($\$3.63\text{M}$) and average per-item yield ($\$2,483$), primarily driven by the high efficiency of Supermarket Type3 locations launched that year. Excluding 1985, average revenue per item remains tightly clustered between **$\$2,100$ and $\$2,300$** across all cohorts from 1987 through 2009. This demonstrates that location format and store size dictate long-term revenue potential far more than store longevity or brand maturity.
+
+```{r Files}
+list.files("outputs")
+file.rename("outputs/fat_content_revenue.png", "outputs/fat_content_revenue.png")
+file.rename("outputs/Outlet_type_revenue.png", "outputs/outlet_type_revenue.png")
+file.rename("outputs/Outlet_size_revenue.png", "outputs/outlet_size_revenue.png")
+file.rename("outputs/Item_type_revenue.png", "outputs/item_type_revenue.png")
+file.rename("outputs/Item_Outlet_Sales_revenue.png", "outputs/price_vs_sales.png")
+file.remove("outputs/Price_sales$Item_MRP correlation.png")
+list.files("outputs")
+```
+
+## Strategic Recommendations & Action Items
+
+* **Prioritize High-Yield Formats for Expansion: Shift future capital allocation toward expanding Supermarket Type3 and Medium-sized outlet footprints. Type3 outlets generate superior per-SKU revenue ($3,694/item), proving that operational format drives yield far more than sheer floor size or store age.
+
+* **Optimize SKU Breadth Over Repricing: Rationalize slow-moving inventory across low-performing categories. Because average per-item yield is uniform across all 16 item types ($1,900–$2,400), revenue is strictly volume-driven; reallocating shelf space from bloated categories to high-demand lines will increase stock turnover without requiring aggressive price discounting.
+
+* **Standardize Store Footprint Standards: Re-evaluate allocation strategies in Supermarket Type1 locations. While Type1 drives gross volume through raw store count, its lower per-item yield indicates over-stocking or layout inefficiencies that can be remedied by adopting Type3 inventory management practices.
+
+* **Audit Data Collection Systems: Resolve the 28.3% missing data gap in Outlet_Size records. Establishing mandatory data entry protocols across supply chain and POS systems will eliminate analytical blind spots and allow for full-network spatial optimization.
+
+## Session Clean-up
+
+```{r database disconnect}
+dbDisconnect(con)
+```
+
+**Data Source:** BigMart Sales dataset ('Train.csv')
+**Tech Stack:** R, SQLite, (DBI/RSQLite), readr, ggplot2, dplyr, magrittr, scales
